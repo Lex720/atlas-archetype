@@ -1,0 +1,166 @@
+# https://github.com/compose-spec/compose-spec/blob/master/spec.md#extension
+x-environment: &default-environment
+  MONGODB_URL: mongodb://mongo:mongo@atlas-mongodb?retryWrites=true"
+  MONGODB_DATABASE: test
+  POSTGRESQL_URL: postgresql+asyncpg://postgres:postgres@atlas-postgresql:5432/atlas
+  RABBITMQ_HOST: rabbitmq
+  RABBITMQ_PORT: 5672
+  RABBITMQ_USER: guest
+  RABBITMQ_PASSWORD: guest
+  RABBITMQ_VHOST: /
+  RABBITMQ_QUEUE: atlas.service_bus.replicate
+  SQLALCHEMY_ECHO: debug
+  SQLALCHEMY_ECHO_POOL: debug
+  SQLALCHEMY_POOL_SIZE: 5
+  SQLALCHEMY_MAX_OVERFLOW_POOL: 5
+  SQLALCHEMY_POOL_TIMEOUT: 30
+  PYTHONTRACEMALLOC: 1
+  PYTHONUNBUFFERED: "1"
+
+x-motor: &default-motor
+  QUERY_MOTOR: mongodb
+  COMMAND_MOTOR: postgresql
+
+services:
+  api:
+    image: atlas-deployment
+    build:
+      target: final
+    container_name: atlas-api
+    command: uvicorn src.presentation.api.main:api --host 0.0.0.0 --port 8080 --reload
+    environment:
+      << : [*default-environment, *default-motor]
+    ports:
+      - "8080:8080"
+    volumes:
+      - .:/code
+    depends_on:
+      rabbitmq:
+        condition: service_started
+      postgresql:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+    networks:
+      - atlas-net
+
+  consumer:
+    image: atlas-deployment
+    build:
+      target: final
+    container_name: atlas-consumer
+    command: python src/presentation/consumer
+    environment:
+      << : [*default-environment, *default-motor]
+    volumes:
+      - .:/code
+    depends_on:
+      rabbitmq:
+        condition: service_started
+      postgresql:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+    networks:
+      - atlas-net
+
+  unit-tests:
+    image: atlas-tests
+    build:
+      target: tests
+    container_name: atlas-unit-tests
+    command: >
+      /bin/bash -c "
+        pytest --cov-config=.coveragerc_unit --cov=src tests/unit/ --cov-report=term-missing -v;
+        "
+    environment:
+      << : [*default-environment, *default-motor]
+    volumes:
+      - .:/code
+    networks:
+      - atlas-net
+
+  e2e-tests:
+    image: atlas-tests
+    build:
+      target: tests
+    container_name: atlas-e2e-tests
+    command: >
+      /bin/bash -c "
+        alembic upgrade head;
+        pytest --cov-config=.coveragerc_e2e --cov=src tests/e2e/ --cov-report=term-missing -v;
+        "
+    environment:
+      << : [*default-environment, *default-motor]
+    ports:
+      - "8081:8081"
+    volumes:
+      - .:/code
+    depends_on:
+      rabbitmq:
+        condition: service_started
+      postgresql:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+    networks:
+      - atlas-net
+
+  coverage-report:
+    image: atlas-tests
+    build:
+      target: tests
+    container_name: atlas-coverage-report
+    command: >
+      /bin/bash -c "
+        coverage combine .coverage_unit .coverage_e2e;
+        coverage report;
+        "
+    environment:
+      << : [*default-environment, *default-motor]
+    volumes:
+      - .:/code
+    networks:
+      - atlas-net
+
+  rabbitmq:
+    image: heidiks/rabbitmq-delayed-message-exchange
+    container_name: atlas-rabbitmq
+    ports:
+      - 5672:5672
+      - 15672:15672
+    environment:
+      RABBITMQ_DEFAULT_USER: "guest"
+      RABBITMQ_DEFAULT_PASS: "guest"
+      RABBITMQ_DEFAULT_VHOST: "/"
+    networks:
+      - atlas-net
+
+  postgresql:
+    image: postgres:16
+    container_name: atlas-postgresql
+    ports:
+      - 5432:5432
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=atlas
+    healthcheck:
+      test: "exit 0"
+    networks:
+      - atlas-net
+
+  mongodb:
+    image: mongo:7
+    container_name: atlas-mongodb
+    restart: always
+    ports:
+      - 27017:27017
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: mongo
+      MONGO_INITDB_ROOT_PASSWORD: mongo
+    networks:
+      - atlas-net
+
+networks:
+  atlas-net:
