@@ -64,6 +64,22 @@ services:
     networks:
       - atlas-net
 
+  migrate:
+    image: atlas-migration
+    build:
+      target: migration
+    container_name: atlas-migrate
+    command: sh -c "alembic upgrade head"
+    environment:
+      << : [*default-environment, *default-motor]
+    volumes:
+      - .:/code
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    networks:
+      - atlas-net
+
   unit-tests:
     image: atlas-tests
     build:

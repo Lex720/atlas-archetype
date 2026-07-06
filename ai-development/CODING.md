@@ -16,11 +16,69 @@ Follow PEP 8 plus:
 **Reverse notation** — sequence is module_action_resource_type:
 `elements_active` not `active_elements` → `GameCreateUseCase`, `game_create()`, `game_dict`
 
-**Domain simplicity** — simple name inside domain, add context on import:
+**Domain simplicity / Import aliasing** — name every class simply inside its own module. Add context only when importing it elsewhere using `as`. This keeps definitions clean and makes the role of each symbol explicit at the call site.
+
+Suffixes by type:
+
+| Type | Defined as | Imported as |
+|---|---|---|
+| Domain entity | `Game` | `Game as GameEntity` |
+| Domain use-case interface (ABC) | `Game` | `Game as GameUsecase` |
+| Application use-case (concrete) | `Game` | `Game as GameUsecase` |
+| Domain repository interface (ABC) | `Game` | `Game as GameRepository` |
+| Service (FastAPI dependency) | `game` | `game as game_service` |
+| DTO | `GameOutput` | `GameOutput as GameOutputDTO` |
+
 ```python
-class GameCreate(ABC): ...  # inside src/domain/game/command/usecase.py
-from src.domain.game.command.usecase import GameCreate as GameCreateUsecase
+# src/domain/game/entity.py
+@dataclass
+class Game: ...
+
+# src/domain/game/usecase.py
+class Game(ABC): ...
+
+# src/domain/game/repository.py
+class Game(ABC): ...
+
+# src/application/game/usecase.py
+from src.domain.game.usecase import Game as GameUsecase
+from src.domain.game.entity import Game as GameEntity
+
+class Game(GameUsecase): ...
+
+# src/infrastructure/game/memory_repository.py
+from src.domain.game.repository import Game as GameRepository
+
+class InMemoryGameRepository(GameRepository): ...
+
+# src/application/game/service.py
+from src.domain.game.repository import Game as GameRepository
+
+@lru_cache
+def repository() -> GameRepository:
+    return InMemoryGameRepository()
+
+def game() -> Game: ...
+
+# src/presentation/api/resources/game/dtos.py
+from src.domain.game.entity import Game as GameEntity  # avoids collision with DTO class
+
+class GameOutput(BaseModel):
+    @classmethod
+    def from_entity(cls, entity: GameEntity) -> "GameOutput": ...
+
+# src/presentation/api/resources/game/routes.py
+from src.application.game.service import game as game_service
+from src.application.game.usecase import Game as GameUsecase
+from src.domain.game.repository import Game as GameRepository
+from src.presentation.api.resources.game.dtos import GameOutput as GameOutputDTO
+
+async def start_game(
+    usecase: Annotated[GameUsecase, Depends(game_service)],
+) -> GameOutputDTO: ...
 ```
+
+The rule also resolves name collisions: when a DTO and a domain entity share a name, import the entity as `...Entity` inside the DTO module.
 
 ## Indentation
 4 spaces. Never tabs.

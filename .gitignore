@@ -45,6 +45,10 @@ htmlcov/
 # Claude Code
 .claude/
 
+# Claude Code internal files
+CLAUDE.md
+MEMORY.md
+
 # macOS
 .DS_Store
 

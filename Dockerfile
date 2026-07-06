@@ -105,11 +105,31 @@ FROM base-small AS final
 
 COPY --from=final-builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 
-COPY . ./
+COPY src/ ./src/
 
 RUN chown -R app:app ./src
 
 USER app
+
+# -----------------------------------------------------------------------------
+# migration: runs Alembic migrations against Postgres.
+# Copies the pre-built prod venv from final-builder (same as final — prod
+# deps only, no test/lint).
+# -----------------------------------------------------------------------------
+FROM base-small AS migration
+
+COPY --from=final-builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
+
+COPY src/ ./src/
+COPY alembic.ini ./
+
+ENV PYTHONPATH=/code
+
+RUN chown -R app:app ./src ./alembic.ini
+
+USER app
+
+CMD ["alembic", "upgrade", "head"]
 
 # -----------------------------------------------------------------------------
 # tests: CI/testing image.
